@@ -6,7 +6,6 @@
 #include <boost/noncopyable.hpp>
 #include <unordered_map>
 #include <mutex>
-#include <list>
 
 namespace DB
 {
@@ -21,6 +20,7 @@ public:
     {
         FileCachePtr cache;
         FileCacheSettings settings;
+        const std::string config_path;
 
         FileCacheData() = default;
         FileCacheData(FileCachePtr cache_, const FileCacheSettings & settings_) : cache(cache_), settings(settings_) {}
@@ -30,11 +30,16 @@ public:
 
     static FileCacheFactory & instance();
 
-    FileCachePtr getOrCreate(const std::string & cache_name, const FileCacheSettings & file_cache_settings);
+    FileCachePtr getOrCreate(
+        const std::string & cache_name,
+        const FileCacheSettings & file_cache_settings,
+        const std::string & config_path);
 
     CacheByName getAll();
 
     FileCacheData getByName(const std::string & cache_name);
+
+    void updateSettingsFromConfig(const Poco::Util::AbstractConfiguration & config);
 
 private:
     std::mutex mutex;

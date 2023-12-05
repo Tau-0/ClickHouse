@@ -154,6 +154,10 @@ public:
 
     void cancelDownload();
 
+    size_t getBackgroundDownloadQueueSizeLimit() const;
+
+    void setBackgroundDownloadQueueSizeLimit(size_t size);
+
 private:
     const std::string path; /// Cache base path
     const CleanupQueuePtr cleanup_queue;

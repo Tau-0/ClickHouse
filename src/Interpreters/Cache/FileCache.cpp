@@ -1258,6 +1258,11 @@ FileCache::~FileCache()
 
 void FileCache::deactivateBackgroundOperations()
 {
+    {
+        auto lock = lockCache();
+        shutdown = true;
+    }
+
     metadata.cancelDownload();
     metadata.cancelCleanup();
 
@@ -1347,6 +1352,43 @@ void FileCache::assertCacheCorrectness()
             chassert(file_segment.assertCorrectness());
         }
     });
+}
+
+FileCacheSettings FileCache::applySettingsIfPossible(const FileCacheSettings & settings)
+{
+    if (!is_initialized)
+        return ;
+    {
+        auto lock = lockCache();
+        shutdown = true;
+    }
+
+    if (max_file_segment_size != settings.max_file_segment_size)
+    {
+        LOG_DEBUG(log, "Changing max_file_segment_size from {} to {}", max_file_segment_size, settings.max_file_segment_size);
+        max_file_segment_size = settings.max_file_segment_size;
+    }
+    if (boundary_alignment != settings.boundary_alignment)
+    {
+        LOG_DEBUG(log, "Changing boundary_alignment from {} to {}", boundary_alignment, settings.boundary_alignment);
+        boundary_alignment = settings.boundary_alignment;
+    }
+    if (metadata.getBackgroundDownloadQueueSizeLimit() != settings.background_download_queue_size_limit)
+    {
+        LOG_DEBUG(log, "Changing background_download_queue_size_limit from {} to {}",
+                  metadata.getBackgroundDownloadQueueSizeLimit(), settings.background_download_queue_size_limit);
+        metadata.setBackgroundDownloadQueueSizeLimit(settings.background_download_queue_size_limit);
+    }
+    if (background_download_threads < settings.background_download_threads)
+    {
+        LOG_DEBUG(log, "Changing background_download_threads from {} to {}", boundary_alignment, settings.boundary_alignment);
+        size_t threads_to_add = settings.background_download_threads - background_download_threads;
+        for (size_t i = 0; i < threads_to_add; ++i)
+        {
+            download_threads.emplace_back([this] { metadata.downloadThreadFunc(); });
+        }
+        background_download_threads = settings.background_download_threads;
+    }
 }
 
 FileCache::QueryContextHolder::QueryContextHolder(
