@@ -5,7 +5,7 @@ import concurrent.futures
 from pathlib import Path
 import subprocess
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from github import Github
 from s3_helper import S3Helper
@@ -223,15 +223,15 @@ def check_missing_images_on_dockerhub(
                 if stderr.startswith("no such manifest"):
                     result[name] = digest
                 else:
-                    print(f"Eror: Unknown error: {stderr}, {name}, {arch}")
+                    print(f"Error: Unknown error: {stderr}, {name}, {arch}")
             elif stdout:
                 if "mediaType" in stdout:
                     pass
                 else:
-                    print(f"Eror: Unknown response: {stdout}")
+                    print(f"Error: Unknown response: {stdout}")
                     assert False, "FIXME"
             else:
-                print(f"Eror: No response for {name}, {digest}, {arch}")
+                print(f"Error: No response for {name}, {digest}, {arch}")
                 assert False, "FIXME"
     return result
 
@@ -295,6 +295,7 @@ def _configure_docker_jobs(rebuild_all_dockers: bool) -> Dict:
             for name in imagename_digest_dict
             if not images_info[name]["only_amd64"]
         ]
+
     print("...checking missing images in dockerhub - done")
     return {
         "images": imagename_digest_dict,
@@ -310,6 +311,7 @@ def _configure_jobs(
     job_digester: JobDigester,
     s3: S3Helper,
     rebuild_all_binaries: bool,
+    pr_labels: Iterable[str],
 ) -> Dict:
     # a. digest each item from the config
     job_digester = JobDigester()
@@ -336,14 +338,24 @@ def _configure_jobs(
     done_files += done_files_docs
     for job in digests:
         digest = digests[job]
-        num_batches: int = CI_CONFIG.get_job_config(job).num_batches
+        job_config = CI_CONFIG.get_job_config(job)
+        num_batches: int = job_config.num_batches
         batches_to_do: List[int] = []
-        for batch in range(num_batches):  # type: ignore
-            success_flag_name = get_file_flag_name(job, digest, batch, num_batches)
-            if success_flag_name not in done_files or (
-                rebuild_all_binaries and is_build_job(job)
-            ):
-                batches_to_do.append(batch)
+
+        if job_config.run_by_label:
+            # this job controled by label, add to todo if it's labe is set in pr
+            if job_config.run_by_label in pr_labels:
+                for batch in range(num_batches):  # type: ignore
+                    batches_to_do.append(batch)
+        else:
+            # this job controled by digest, add to todo if it's not successfully done before
+            for batch in range(num_batches):  # type: ignore
+                success_flag_name = get_file_flag_name(job, digest, batch, num_batches)
+                if success_flag_name not in done_files or (
+                    rebuild_all_binaries and is_build_job(job)
+                ):
+                    batches_to_do.append(batch)
+
         if batches_to_do:
             jobs_to_do.append(job)
             jobs_params[job] = {
@@ -352,6 +364,7 @@ def _configure_jobs(
             }
         else:
             jobs_to_skip += (job,)
+
     return {
         "digests": digests,
         "jobs_to_do": jobs_to_do,
@@ -367,8 +380,7 @@ def _update_gh_statuses(indata: Dict, s3: S3Helper) -> None:
         temp_path.mkdir(parents=True, exist_ok=True)
 
     # clean up before start
-    ci_files = list(temp_path.glob("*.ci"))
-    for file in ci_files:
+    for file in temp_path.glob("*.ci"):
         file.unlink()
 
     # download all metadata files
@@ -500,7 +512,12 @@ def main() -> int:
         )
         jobs_data = (
             _configure_jobs(
-                build_digest, docs_digest, job_digester, s3, args.rebuild_all_binaries
+                build_digest,
+                docs_digest,
+                job_digester,
+                s3,
+                args.rebuild_all_binaries,
+                pr_info.labels,
             )
             if not args.skip_jobs
             else {}
